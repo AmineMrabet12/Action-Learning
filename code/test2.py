@@ -140,5 +140,5 @@ train_dataset = tf.data.Dataset.from_generator(
 )
 
 # Train the model
-early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
-model.fit(train_dataset, epochs=100, callbacks=[early_stopping])
+# early_stopping = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
+model.fit(train_dataset, epochs=100) #, callbacks=[early_stopping])
