@@ -1,2 +1,3 @@
 data/*
 app/audio_output
+.env
