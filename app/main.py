@@ -1,124 +1,119 @@
-# FastAPI Backend (main.py)
+# FastAPI Backend (backend.py)
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
-import psycopg2
-import os
-from dotenv import load_dotenv
+from sqlalchemy import create_engine, Column, Integer, String, LargeBinary
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
 from audiocraft.models import MusicGen
+import torch
+from dotenv import load_dotenv
 import torchaudio
-from fastapi.responses import StreamingResponse
-from fastapi.security import OAuth2PasswordRequestForm
+import os
+import base64
 
 load_dotenv()
 
-app = FastAPI()
+# Database configuration
+# DATABASE_URL = "postgresql+psycopg2://amine:amine@localhost:5432/epita"
+DATABASE_URL = os.getenv('DATABASE_URL')
+Base = declarative_base()
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Database connection
-def get_db_connection():
-    return psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT"),
-    )
+# Models
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True)
+    password = Column(String)
 
-# Pydantic models
+class Song(Base):
+    __tablename__ = 'songs'
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    song_name = Column(String)
+    description = Column(String)
+    audio_data = Column(LargeBinary)
+
+Base.metadata.create_all(bind=engine)
+
+# Pydantic Models
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class UserRegister(BaseModel):
+    username: str
+    password: str
+    confirm_password: str
+
 class SongRequest(BaseModel):
     description: str
     duration: int
     song_name: str
 
-class User(BaseModel):
-    username: str
-    password: str
+# App Initialization
+app = FastAPI()
 
-@app.on_event("startup")
-async def load_model():
-    global model
-    model = MusicGen.get_pretrained('facebook/musicgen-small')
-
-@app.post("/register/")
-async def register(user: User):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username = %s", (user.username,))
-    if cursor.fetchone():
-        conn.close()
-        raise HTTPException(status_code=400, detail="Username already exists.")
-
-    cursor.execute("INSERT INTO users (username, password) VALUES (%s, %s)", (user.username, user.password))
-    conn.commit()
-    conn.close()
-    return {"message": "Registration successful!"}
-
-@app.post("/login/")
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, username FROM users WHERE username = %s AND password = %s", (form_data.username, form_data.password))
-    user = cursor.fetchone()
-    conn.close()
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid username or password.")
-
-    return {"user_id": user[0], "username": user[1]}
-
-@app.post("/generate/")
-async def generate_music(request: SongRequest, user_id: int):
+# Dependency
+async def get_db():
+    db = SessionLocal()
     try:
-        # Generate music using the model
-        model.set_generation_params(
-            use_sampling=True,
-            top_k=250,
-            duration=request.duration
-        )
-        output = model.generate(
-            descriptions=[request.description],
-            progress=True,
-            return_tokens=True
-        )
-        samples = output[0]
+        yield db
+    finally:
+        db.close()
 
-        # Save audio as binary
-        audio_path = f"audio_output/{request.song_name}.wav"
-        torchaudio.save(audio_path, samples[0].detach().cpu(), 32000)
+# Load MusicGen model
+model = MusicGen.get_pretrained('facebook/musicgen-small')
 
-        with open(audio_path, "rb") as f:
-            audio_data = f.read()
+# Helper functions
+def save_audio(samples: torch.Tensor, song_name: str):
+    sample_rate = 32000
+    save_path = "audio_output/"
+    audio_path = os.path.join(save_path, f"{song_name}.wav")
+    torchaudio.save(audio_path, samples[0].detach().cpu(), sample_rate)
+    return audio_path
 
-        # Save to database
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO songs (user_id, song_name, description, audio_data) VALUES (%s, %s, %s, %s)",
-            (user_id, request.song_name, request.description, audio_data),
-        )
-        conn.commit()
-        conn.close()
+# Routes
+@app.post("/login")
+def login(user: UserLogin, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.username == user.username, User.password == user.password).first()
+    if not db_user:
+        raise HTTPException(status_code=400, detail="Invalid credentials")
+    return {"user_id": db_user.id, "username": db_user.username}
 
-        return {"message": "Song generated and saved successfully."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.post("/register")
+def register(user: UserRegister, db: Session = Depends(get_db)):
+    if user.password != user.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+    if db.query(User).filter(User.username == user.username).first():
+        raise HTTPException(status_code=400, detail="Username already exists")
+    new_user = User(username=user.username, password=user.password)
+    db.add(new_user)
+    db.commit()
+    return {"message": "Registration successful"}
 
-@app.get("/playlist/")
-async def get_playlist(user_id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, song_name, description FROM songs WHERE user_id = %s", (user_id,))
-    songs = cursor.fetchall()
-    conn.close()
-    return {"playlist": songs}
+@app.post("/generate")
+def generate_song(request: SongRequest, user_id: int, db: Session = Depends(get_db)):
+    model.set_generation_params(use_sampling=True, top_k=250, duration=request.duration)
+    output = model.generate(descriptions=[request.description], progress=True, return_tokens=True)
+    audio_path = save_audio(output[0], request.song_name)
+    with open(audio_path, 'rb') as f:
+        audio_data = f.read()
+    new_song = Song(user_id=user_id, song_name=request.song_name, description=request.description, audio_data=audio_data)
+    db.add(new_song)
+    db.commit()
+    return {"audio_path": audio_path}
 
-@app.get("/audio/{song_id}")
-async def stream_audio(song_id: int):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT audio_data FROM songs WHERE id = %s", (song_id,))
-    song = cursor.fetchone()
-    conn.close()
+@app.get("/playlist")
+def get_playlist(user_id: int, db: Session = Depends(get_db)):
+    songs = db.query(Song).filter(Song.user_id == user_id).all()
+    return [{"id": song.id, "song_name": song.song_name, "description": song.description} for song in songs]
 
+@app.get("/song/{song_id}")
+def get_song(song_id: int, db: Session = Depends(get_db)):
+    song = db.query(Song).filter(Song.id == song_id).first()
     if not song:
-        raise HTTPException(status_code=404, detail="Song not found.")
-
-    return StreamingResponse(iter([song[0]]), media_type="audio/wav")
+        raise HTTPException(status_code=404, detail="Song not found")
+    audio_base64 = base64.b64encode(song.audio_data).decode()
+    return {"song_name": song.song_name, "description": song.description, "audio_data": audio_base64}
