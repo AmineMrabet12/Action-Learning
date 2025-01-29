@@ -76,14 +76,14 @@ def save_audio(samples: torch.Tensor, song_name: str):
 
 # Routes
 @app.post("/login")
-def login(user: UserLogin, db: Session = Depends(get_db)):
+def login(user: UserLogin, db = Depends(get_db)):
     db_user = db.query(User).filter(User.username == user.username, User.password == user.password).first()
     if not db_user:
         raise HTTPException(status_code=400, detail="Invalid credentials")
     return {"user_id": db_user.id, "username": db_user.username}
 
 @app.post("/register")
-def register(user: UserRegister, db: Session = Depends(get_db)):
+def register(user: UserRegister, db = Depends(get_db)):
     if user.password != user.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
     if db.query(User).filter(User.username == user.username).first():
@@ -94,8 +94,9 @@ def register(user: UserRegister, db: Session = Depends(get_db)):
     return {"message": "Registration successful"}
 
 @app.post("/generate")
-def generate_song(request: SongRequest, user_id: int, db: Session = Depends(get_db)):
+def generate_song(request: SongRequest, user_id: int, db = Depends(get_db)):
     model.set_generation_params(use_sampling=True, top_k=250, duration=request.duration)
+    
     output = model.generate(descriptions=[request.description], progress=True, return_tokens=True)
     audio_path = save_audio(output[0], request.song_name)
     with open(audio_path, 'rb') as f:
@@ -105,15 +106,25 @@ def generate_song(request: SongRequest, user_id: int, db: Session = Depends(get_
     db.commit()
     return {"audio_path": audio_path}
 
+
 @app.get("/playlist")
-def get_playlist(user_id: int, db: Session = Depends(get_db)):
+def get_playlist(user_id: int, db = Depends(get_db)):
     songs = db.query(Song).filter(Song.user_id == user_id).all()
     return [{"id": song.id, "song_name": song.song_name, "description": song.description} for song in songs]
 
 @app.get("/song/{song_id}")
-def get_song(song_id: int, db: Session = Depends(get_db)):
+def get_song(song_id: int, db = Depends(get_db)):
     song = db.query(Song).filter(Song.id == song_id).first()
     if not song:
         raise HTTPException(status_code=404, detail="Song not found")
     audio_base64 = base64.b64encode(song.audio_data).decode()
     return {"song_name": song.song_name, "description": song.description, "audio_data": audio_base64}
+
+@app.delete("/song/{song_id}")
+def delete_song(song_id: int, db = Depends(get_db)):
+    song = db.query(Song).filter(Song.id == song_id).first()
+    if not song:
+        raise HTTPException(status_code=404, detail="Song not found")
+    db.delete(song)
+    db.commit()
+    return {"message": "Song deleted successfully"}
