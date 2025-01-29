@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import base64
+from googletrans import Translator
 
 API_URL = "http://localhost:8000"
 
@@ -41,23 +42,53 @@ st.markdown(
 )
 
 
+
+
+def translate_text(input_text: str, target_language: str = "en"):
+    try:
+        translator = Translator()
+        # Detect the language and translate the text
+        translation = translator.translate(input_text, dest=target_language)
+        return translation.text
+    except Exception as e:
+        return f"Translation failed: {e}"
+
 # Pages
 def show_home():
     st.title("Text to Music Generator")
+    st.markdown("**Enter a text description to generate music. If the input is in another language, it will be translated to English.**")
 
-    with st.expander("See explanation"):
-        st.write("Music Generator app built using Meta's Audiocraft library. We are using Music Gen Small model.")
-        
-    text_area = st.text_area("Enter your description.......")
+    # User input for text description
+    text_area = st.text_area("Enter your description")
+    translate_option = st.checkbox("Translate description to English (if not in English)")
+    translated_text = text_area  # Default to user input
+
+    # Translate the text if the user opts in
+    if translate_option and text_area:
+        with st.spinner("Translating..."):
+            try:
+                translated_text = translate_text(text_area, target_language="en")
+                st.success(f"Translated Text: {translated_text}")
+            except Exception as e:
+                st.error(f"Translation failed: {e}")
+
+    # Select the duration of music and song name
     time_slider = st.slider("Select time duration (In Seconds)", 0, 20, 10)
     song_name = st.text_input("Enter song name:")
 
+    # Generate music
     if st.button("Generate Music"):
+        if not translated_text:
+            st.error("Please enter a description before generating music!")
+            return
+
+        # Call the API to generate music
         response = requests.post(f"{API_URL}/generate", json={
-            "description": text_area,
+            "description": translated_text,
             "duration": time_slider,
             "song_name": song_name
         }, params={"user_id": st.session_state.user_id})
+
         if response.status_code == 200:
             audio_path = response.json()["audio_path"]
             st.audio(audio_path)
