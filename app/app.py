@@ -1,9 +1,7 @@
 import streamlit as st
 import requests
 import base64
-import torch
-from diffusers import DiffusionPipeline
-import streamlit as st
+from gradio_client import Client
 
 API_URL = "http://localhost:8000"
 
@@ -18,7 +16,6 @@ if "register_mode" not in st.session_state:
     st.session_state.register_mode = False
 if "current_page" not in st.session_state:
     st.session_state.current_page = "home"
-
 
 st.markdown(
     """
@@ -43,43 +40,45 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
-device = "cuda"
-dtype = torch.float16
-
-def initialize_model():
-    if "model" not in st.session_state:
-        try:
-            # Load the AnimateDiff model pipeline
-            pipe = DiffusionPipeline.from_pretrained("emilianJR/epiCRealism").to(device)
-            st.session_state.model = pipe
-            return pipe
-        except Exception as e:
-            st.error(f"Model initialization failed: {str(e)}")
-            return None
-    return st.session_state.model
-
 def show_animation_generator():
-    st.subheader("Generate Animation")
-    prompt = st.text_input("Enter animation prompt")
+   
+    # User input for the prompt
+    prompt = st.text_input("Enter a description for the animation:", "A happy dancing cat")
+
+    # Define the URL for the API
+    api_url = "https://bytedance-animatediff-lightning.hf.space/queue/join?__theme=system"
+
+    headers = {
+        'Content-Type': 'application/json',  # Assuming JSON payload
+    }
     
-    if prompt and st.button("Generate Animation"):
-        try:
-            # Initialize model
-            pipe = initialize_model()
+    data = {
+        "data": [prompt, "ToonYou", "", 4],
+        "event_data": None,
+        "fn_index": 1,
+        "session_hash": "mnyc0m0ecoa",
+        "trigger_id": 10
+    }
+    
+    try:
+        # Make the POST request
+        response = requests.post(api_url, json=data, headers=headers)
+        print(response)
+        
+        if response.status_code == 200:
+            st.success("Successfully joined the queue!")
+            return response.json()  # Process and display the response
+        else:
+            st.error(f"Failed to join queue. Status code: {response.status_code}")
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
 
-            with st.spinner("Generating animation..."):
-                # Generate the image or animation
-                output = pipe(prompt)
-                image = output.images[0]
+# Add button in Streamlit app
+if st.button("Join Queue"):
+    result = join_queue()
+    if result:
+        st.write(result)  # Display the result if necessary
 
-                # Save and display the image
-                output_path = "generated_image.png"
-                image.save(output_path)
-                st.success("Animation generated successfully!")
-                st.image(output_path)
-
-        except Exception as e:
-            st.error(f"Error generating animation: {str(e)}")
 
 # Pages
 def show_home():
