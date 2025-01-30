@@ -1,6 +1,9 @@
 import streamlit as st
 import requests
 import base64
+import torch
+from diffusers import DiffusionPipeline
+import streamlit as st
 
 API_URL = "http://localhost:8000"
 
@@ -40,6 +43,43 @@ st.markdown(
     """, unsafe_allow_html=True
 )
 
+device = "cuda"
+dtype = torch.float16
+
+def initialize_model():
+    if "model" not in st.session_state:
+        try:
+            # Load the AnimateDiff model pipeline
+            pipe = DiffusionPipeline.from_pretrained("emilianJR/epiCRealism").to(device)
+            st.session_state.model = pipe
+            return pipe
+        except Exception as e:
+            st.error(f"Model initialization failed: {str(e)}")
+            return None
+    return st.session_state.model
+
+def show_animation_generator():
+    st.subheader("Generate Animation")
+    prompt = st.text_input("Enter animation prompt")
+    
+    if prompt and st.button("Generate Animation"):
+        try:
+            # Initialize model
+            pipe = initialize_model()
+
+            with st.spinner("Generating animation..."):
+                # Generate the image or animation
+                output = pipe(prompt)
+                image = output.images[0]
+
+                # Save and display the image
+                output_path = "generated_image.png"
+                image.save(output_path)
+                st.success("Animation generated successfully!")
+                st.image(output_path)
+
+        except Exception as e:
+            st.error(f"Error generating animation: {str(e)}")
 
 # Pages
 def show_home():
@@ -107,8 +147,10 @@ def show_login():
     # with col2:
     #     register_button = st.button("Register", key="register_button")
     if register_button:
-        st.session_state.register_mode = True
-
+        st.session_state.register_mode = True  
+        
+    show_animation_generator()  
+        
 def show_register():
     st.title("Register")
     username = st.text_input("New Username")
