@@ -1,7 +1,7 @@
 # FastAPI Backend (backend.py)
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, LargeBinary
+from sqlalchemy import create_engine, Column, Integer, String, LargeBinary, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from audiocraft.models import MusicGen
@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import torchaudio
 import os
 import base64
+from datetime import datetime, timezone, timedelta
 
 load_dotenv()
 
@@ -34,6 +35,17 @@ class Song(Base):
     song_name = Column(String)
     description = Column(String)
     audio_data = Column(LargeBinary)
+
+class Story(Base):
+    __tablename__ = 'stories'
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    content = Column(String)  # Could be a URL to an image/video or text
+    created_at = Column(DateTime, default=datetime.now(timezone.utc))
+    expires_at = Column(DateTime)
+
+    # def set_expiration(self):
+    #     self.expires_at = self.created_at + timedelta(hours=24)
 
 Base.metadata.create_all(bind=engine)
 
@@ -64,7 +76,7 @@ async def get_db():
         db.close()
 
 # Load MusicGen model
-model = MusicGen.get_pretrained('facebook/musicgen-small')
+model = None # MusicGen.get_pretrained('facebook/musicgen-small')
 
 # Helper functions
 def save_audio(samples: torch.Tensor, song_name: str):
@@ -128,3 +140,40 @@ def delete_song(song_id: int, db = Depends(get_db)):
     db.delete(song)
     db.commit()
     return {"message": "Song deleted successfully"}
+
+###########################################################################
+########################### Generate User Story ###########################
+###########################################################################
+
+@app.post("/post_story")
+def post_story(user_id: int, content: str, db: Session = Depends(get_db)):
+    created_at = datetime.now(timezone.utc)  # Current timestamp
+    expires_at = created_at + timedelta(hours=24)  # Story expires in 24 hours
+    new_story = Story(
+        user_id=user_id,
+        content=content,
+        created_at=created_at,
+        expires_at=expires_at
+    )
+    db.add(new_story)
+    db.commit()
+    db.refresh(new_story)
+    return {"message": "Story posted successfully", "story_id": new_story.id}
+
+
+# Get active stories (those that haven't expired)
+@app.get("/stories")
+def get_active_stories(db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    stories = db.query(Story).filter(Story.expires_at > now).all()
+    return stories
+
+# Delete expired stories (could be run periodically, but for now manually)
+@app.delete("/delete_expired_stories")
+def delete_expired_stories(db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    expired_stories = db.query(Story).filter(Story.expires_at <= now).all()
+    for story in expired_stories:
+        db.delete(story)
+    db.commit()
+    return {"message": f"{len(expired_stories)} expired stories deleted"}
