@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import base64
-from gradio_client import Client
 
 API_URL = "http://localhost:8000"
 
@@ -41,43 +40,81 @@ st.markdown(
 )
 
 def show_animation_generator():
+    # URL of the video file
+    video_url = "https://bytedance-animatediff-lightning.hf.space/file=/tmp/gradio/89e97f5e923460956b556df466d66ae57ecdaf41/93214f1ffb8d4b77b006a15495b697d9.mp4"
+
+    # Display the video in Streamlit
+    st.video(video_url)
    
     # User input for the prompt
     prompt = st.text_input("Enter a description for the animation:", "A happy dancing cat")
 
+
     # Define the URL for the API
     api_url = "https://bytedance-animatediff-lightning.hf.space/queue/join?__theme=system"
+    data_api_url = "https://bytedance-animatediff-lightning.hf.space/queue/data"
 
-    headers = {
-        'Content-Type': 'application/json',  # Assuming JSON payload
-    }
-    
-    data = {
-        "data": [prompt, "ToonYou", "", 4],
-        "event_data": None,
-        "fn_index": 1,
-        "session_hash": "mnyc0m0ecoa",
-        "trigger_id": 10
-    }
-    
-    try:
-        # Make the POST request
-        response = requests.post(api_url, json=data, headers=headers)
-        print(response)
+    # Function to make the POST request
+    def join_queue():
+        headers = {
+            'Content-Type': 'application/json',  # Assuming JSON payload
+        }
         
-        if response.status_code == 200:
-            st.success("Successfully joined the queue!")
-            return response.json()  # Process and display the response
-        else:
-            st.error(f"Failed to join queue. Status code: {response.status_code}")
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
+        data = {
+            "data": [prompt, "ToonYou", "", 4],
+            "event_data": None,
+            "fn_index": 1,
+            "session_hash": "fl9aopcpix",
+            "trigger_id": 10
+        }
+        
+        try:
+            # Make the POST request
+            response = requests.post(api_url, json=data, headers=headers)
+            
+            if response.status_code == 200:
+                # st.success("Successfully joined the queue!")
+                return response.json()  # Process and display the response
+            else:
+                st.error(f"Failed to join queue. Status code: {response.status_code}")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+            
+    def fetch_queue_data():
+        headers = {
+            'Content-Type': 'text/event-stream; charset=utf-8',  # Assuming JSON payload
+        }
+        session_hash = "fl9aopcpix"  # You can update this as needed
+        params = {'session_hash': session_hash}  # Include the session_hash as a query parameter
+        
+        try:
+            # Make the GET request to fetch data
+            response = requests.get(data_api_url, params=params)
+            
+            # Debug: Check response status and content
+            # st.write(f"Response status code: {response.status_code}")
+            st.write(f"Response content: {response.text[:5000]}")  # Display first 500 characters for debugging
+            
+            if response.status_code == 200:
+                url = response.text.split("url")[1].split(",")[0][1:]
+                return url  # Return raw text if it's not JSON
+            else:
+                st.error(f"Failed to fetch data. Status code: {response.status_code}")
+                return None
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
 
-# Add button in Streamlit app
-if st.button("Join Queue"):
-    result = join_queue()
-    if result:
-        st.write(result)  # Display the result if necessary
+    # Add button in Streamlit app
+    if st.button("Join Queue"):
+        result = join_queue()
+        # if result:
+            # st.write(result)  # Display the result if necessary
+        queue_data = fetch_queue_data()
+        if queue_data:
+            # continuous_data_fetch()
+            st.video(queue_data)
+   
+            st.write(queue_data)  # Display the fetched data
 
 
 # Pages
