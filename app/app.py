@@ -93,10 +93,11 @@ def show_animation_generator():
             
             # Debug: Check response status and content
             # st.write(f"Response status code: {response.status_code}")
-            st.write(f"Response content: {response.text[:5000]}")  # Display first 500 characters for debugging
+            # st.write(f"Response content: {response.text[:5000]}")  # Display first 500 characters for debugging
             
             if response.status_code == 200:
-                url = response.text.split("url")[1].split(",")[0][1:]
+                url = response.text.split("url\":\"")[1].split("\",")[0]
+                # st.write(url)
                 return url  # Return raw text if it's not JSON
             else:
                 st.error(f"Failed to fetch data. Status code: {response.status_code}")
@@ -112,9 +113,9 @@ def show_animation_generator():
         queue_data = fetch_queue_data()
         if queue_data:
             # continuous_data_fetch()
+            st.write(queue_data)  # Display the fetched data
             st.video(queue_data)
    
-            st.write(queue_data)  # Display the fetched data
 
 
 # Pages
