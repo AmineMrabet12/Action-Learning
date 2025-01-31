@@ -1,16 +1,22 @@
 import streamlit as st
-# import streamlit.components.v1 as components
 import requests
 import base64
 import uuid
 import urllib.parse
 from googletrans import Translator
 import pyperclip
+from diffusers import DiffusionPipeline
 from time import sleep
+from io import BytesIO
+from PIL import Image
 
 API_URL = "http://localhost:8000"
 
 # Initialize session state
+# Initialize session state for user profile
+if "user_profile" not in st.session_state:
+    st.session_state.user_profile = {}
+
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
@@ -49,8 +55,6 @@ st.markdown(
     </style>
     """, unsafe_allow_html=True
 )
-
-
 
 
 def translate_text(input_text: str, target_language: str = "en"):
@@ -330,36 +334,103 @@ def post_story_form():
         else:
             st.error("Please enter some content for the story.")
 
-def show_profile():
-    st.title("Profile")
-    
-    # Allow user to upload a profile picture
-    uploaded_image = st.file_uploader("Upload Profile Picture", type=["jpg", "jpeg", "png"])
-    if uploaded_image:
-        st.image(uploaded_image, caption="Profile Picture", use_container_width=True)
 
-    # Input fields for user details
-    first_name = st.text_input("First Name")
-    last_name = st.text_input("Last Name")
-    dob = st.date_input("Date of Birth")
-    email = st.text_input("Email")
-    address = st.text_area("Address")
+#########################################################################
+########################### Show User Profile ###########################
+#########################################################################
 
-    # Display the input data
-    if st.button("Save Profile"):
-        if all([first_name, last_name, dob, email, address]):
-            st.success("Profile saved successfully!")
-            # In a real app, you could save these details to a database or file
+def get_user_profile():
+    """Fetch user profile from the backend API."""
+    response = requests.get(f"{API_URL}/profile", params={"user_id": st.session_state.user_id})
+    if response.status_code == 200:
+        st.session_state.user_profile = response.json()
+    else:
+        st.error("Failed to load profile.")
+
+
+def update_user_profile(user_id):
+    """Update user profile by sending the data to the backend."""
+    try:
+        user_profile = st.session_state.user_profile
+        if user_profile.get("dob"):
+            user_profile["dob"] = user_profile["dob"].isoformat()  # Convert to ISO string
+
+        # Prepare the data for the request
+        profile_data = {
+            "first_name": user_profile.get("first_name"),
+            "last_name": user_profile.get("last_name"),
+            "dob": user_profile.get("dob"),
+            "email": user_profile.get("email"),
+            "address": user_profile.get("address")
+        }
+
+        # Handle the profile picture upload
+        if "profile_picture" in user_profile:
+            # Directly send the file, no need for base64 encoding
+            profile_picture = user_profile["profile_picture"]
+            if isinstance(profile_picture, Image.Image):  # If image was uploaded
+                profile_picture = profile_picture.convert("RGB")
+                # Save the image to a buffer
+                buffered = BytesIO()
+                profile_picture.save(buffered, format="PNG")
+                buffered.seek(0)
+                files = {"profile_picture": ("profile_picture.png", buffered, "image/png")}
+                response = requests.put(f"{API_URL}/profile/{user_id}", files=files, data=profile_data)
+            else:
+                # If there is no image, just send the user profile data
+                response = requests.put(f"{API_URL}/profile/{user_id}", json=profile_data)
+
+        if response.status_code == 200:
+            st.success("Profile updated successfully.")
         else:
-            st.error("Please fill in all fields.")
+            st.error(f"Failed to update profile: {response.json()['detail']}")
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+
+
+def show_profile():
+    """Show the user's profile and allow editing."""
+    st.title("User Profile")
+
+    # Fetch profile details if not already loaded
+    if not st.session_state.user_profile:
+        get_user_profile()
+
+    # Profile Picture
+    st.subheader("Profile Picture")
+    uploaded_image = st.file_uploader("Upload a New Profile Picture", type=["jpg", "jpeg", "png"])
+
+    if uploaded_image:
+        image = Image.open(uploaded_image)
+        st.image(image, caption="New Profile Picture", use_container_width=True)
+        st.session_state.user_profile["profile_picture"] = image  # Store the image directly
+
+    # Display Existing Profile Picture if Available
+    if "profile_picture" in st.session_state.user_profile and st.session_state.user_profile["profile_picture"]:
+        profile_picture = st.session_state.user_profile["profile_picture"]
+        st.image(profile_picture, caption="Current Profile Picture", use_container_width=True)
+
+    # User Details Form
+    st.subheader("Edit Profile Details")
+    st.session_state.user_profile["first_name"] = st.text_input("First Name", st.session_state.user_profile.get("first_name", ""))
+    st.session_state.user_profile["last_name"] = st.text_input("Last Name", st.session_state.user_profile.get("last_name", ""))
+    st.session_state.user_profile["email"] = st.text_input("Email", st.session_state.user_profile.get("email", ""))
+    st.session_state.user_profile["dob"] = st.date_input("Date of Birth", st.session_state.user_profile.get("dob", None))
+    st.session_state.user_profile["address"] = st.text_area("Address", st.session_state.user_profile.get("address", ""))
+
+    # Save Button
+    if st.button("Save Profile"):
+        userID = st.session_state.user_id
+        update_user_profile(userID)
+
 
 def get_user_profiles():
+    """Fetch user profiles from the database via API."""
     return [
         {"first_name": "John", "last_name": "Doe", "email": "john.doe@example.com", "user_id": 1},
         {"first_name": "Jane", "last_name": "Smith", "email": "jane.smith@example.com", "user_id": 2},
         {"first_name": "Mike", "last_name": "Johnson", "email": "mike.johnson@example.com", "user_id": 3},
     ]
-
 
 # Function to show the search page
 def show_search_page():
@@ -384,6 +455,40 @@ def show_search_page():
         else:
             st.write("No results found.")
 
+def initialize_model():
+    if "model" not in st.session_state:
+        try:
+            # Load the AnimateDiff model pipeline
+            pipe = DiffusionPipeline.from_pretrained("emilianJR/epiCRealism")#.to(device)
+            st.session_state.model = pipe
+            return pipe
+        except Exception as e:
+            st.error(f"Model initialization failed: {str(e)}")
+            return None
+    return st.session_state.model
+
+def show_animation_generator():
+    st.subheader("Generate Animation")
+    prompt = st.text_input("Enter animation prompt")
+    
+    if prompt and st.button("Generate Animation"):
+        try:
+            # Initialize model
+            pipe = initialize_model()
+
+            with st.spinner("Generating animation..."):
+                # Generate the image or animation
+                output = pipe(prompt)
+                image = output.images[0]
+
+                # Save and display the image
+                output_path = "gen_img/generated_image.png"
+                image.save(output_path)
+                st.success("Animation generated successfully!")
+                st.image(output_path)
+
+        except Exception as e:
+            st.error(f"Error generating animation: {str(e)}")
 
 # Main
 if __name__ == "__main__":
@@ -403,7 +508,8 @@ if __name__ == "__main__":
         elif st.session_state.current_page == "playlist":
             show_playlist()
         elif st.session_state.current_page == "stories":
-            show_stories()  # Show the stories page
+            # show_stories()  # Show the stories page
+            show_animation_generator()
         elif st.session_state.current_page == "profile":
             show_profile()
         elif st.session_state.current_page == "search":

@@ -1,7 +1,7 @@
 # FastAPI Backend (backend.py)
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, LargeBinary, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, LargeBinary, DateTime, Date
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from audiocraft.models import MusicGen
@@ -10,12 +10,12 @@ from dotenv import load_dotenv
 import torchaudio
 import os
 import base64
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
+from typing import Optional
 
 load_dotenv()
 
 # Database configuration
-# DATABASE_URL = "postgresql+psycopg2://amine:amine@localhost:5432/epita"
 DATABASE_URL = os.getenv('DATABASE_URL')
 Base = declarative_base()
 engine = create_engine(DATABASE_URL)
@@ -27,6 +27,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
     password = Column(String)
+    tokens = Column(Integer, default=20)
 
 class Song(Base):
     __tablename__ = 'songs'
@@ -47,6 +48,19 @@ class Story(Base):
     # def set_expiration(self):
     #     self.expires_at = self.created_at + timedelta(hours=24)
 
+class UserProfile(Base):
+    __tablename__ = 'user_profile'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, index=True)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    dob = Column(Date, nullable=True)
+    email = Column(String, unique=True, nullable=False)
+    address = Column(String)
+    profile_picture = Column(LargeBinary, nullable=True)  # Store image as binary data
+    created_at = Column(DateTime, default=datetime.now(timezone.utc))
+
 Base.metadata.create_all(bind=engine)
 
 # Pydantic Models
@@ -63,6 +77,14 @@ class SongRequest(BaseModel):
     description: str
     duration: int
     song_name: str
+
+class UserProfileUpdate(BaseModel):
+    first_name: Optional[str]
+    last_name: Optional[str]
+    dob: Optional[date]
+    email: Optional[str]
+    address: Optional[str]
+    profile_picture: Optional[UploadFile] = None
 
 # App Initialization
 app = FastAPI()
@@ -107,12 +129,18 @@ def register(user: UserRegister, db = Depends(get_db)):
 
 @app.post("/generate")
 def generate_song(request: SongRequest, user_id: int, db = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+
     model.set_generation_params(use_sampling=True, top_k=250, duration=request.duration)
     
     output = model.generate(descriptions=[request.description], progress=True, return_tokens=True)
     audio_path = save_audio(output[0], request.song_name)
     with open(audio_path, 'rb') as f:
         audio_data = f.read()
+    
+    user.tokens -= 10
+    db.commit()
+
     new_song = Song(user_id=user_id, song_name=request.song_name, description=request.description, audio_data=audio_data)
     db.add(new_song)
     db.commit()
@@ -177,3 +205,134 @@ def delete_expired_stories(db: Session = Depends(get_db)):
         db.delete(story)
     db.commit()
     return {"message": f"{len(expired_stories)} expired stories deleted"}
+
+#############################################################################
+########################### Generate User Profile ###########################
+#############################################################################
+
+@app.put("/profile/{user_id}")
+async def update_or_create_profile(
+    user_id: int,
+    first_name: str = None,
+    last_name: str = None,
+    dob: str = None,  # Receive date as string or None
+    email: str = None,
+    address: str = None,
+    profile_picture: UploadFile = File(None),  # Optional profile picture
+    db: Session = Depends(get_db),
+):
+    # Check if user exists
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Check if the user already has a profile
+    existing_profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+
+    # Initialize the response variable to be used later
+    response = None
+
+    # If profile doesn't exist, create a new one
+    if not existing_profile:
+        # Ensure dob is a valid date string or None
+        if dob:
+            try:
+                # Convert dob to a datetime object if it exists
+                dob = datetime.strptime(dob, "%Y-%m-%d").date()  # Expected format "YYYY-MM-DD"
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid date format for 'dob'. Expected 'YYYY-MM-DD'.")
+
+        new_profile = UserProfile(
+            user_id=user_id,
+            first_name=first_name if first_name else "",  # Set default empty string if None
+            last_name=last_name if last_name else "",  # Set default empty string if None
+            dob=dob,  # Ensure dob is passed as a valid date or None
+            email=email if email else "",  # Set default empty string if None
+            address=address if address else "",  # Set default empty string if None
+        )
+
+        # Handle profile picture if provided
+        if profile_picture:
+            # Read image data as binary
+            image_data = await profile_picture.read()  # Read the image file as binary data
+            new_profile.profile_picture = image_data  # Store as binary
+        db.add(new_profile)
+        db.commit()
+        db.refresh(new_profile)
+        response = {"message": "Profile created successfully", "profile": new_profile}
+
+    else:
+        # If profile exists, update fields if provided
+        if first_name is not None:
+            existing_profile.first_name = first_name
+        if last_name is not None:
+            existing_profile.last_name = last_name
+        if dob is not None:
+            # Ensure dob is a valid date string or None
+            if dob:
+                try:
+                    # Convert dob to a datetime object if it exists
+                    dob = datetime.strptime(dob, "%Y-%m-%d").date()  # Expected format "YYYY-MM-DD"
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid date format for 'dob'. Expected 'YYYY-MM-DD'.")
+            existing_profile.dob = dob
+        if email is not None:
+            existing_profile.email = email
+        if address is not None:
+            existing_profile.address = address
+
+        # Handle profile picture if provided
+        if profile_picture:
+            # Read image data as binary
+            image_data = await profile_picture.read()  # Read the image file as binary data
+            existing_profile.profile_picture = image_data  # Store as binary
+
+        db.commit()
+        db.refresh(existing_profile)
+        response = {"message": "Profile updated successfully", "profile": existing_profile}
+
+    # Ensure that response is returned after assignment
+    if response is None:
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while processing the profile.")
+
+    return response
+
+
+
+@app.get("/profile/{user_id}")
+def get_profile(user_id: int, db: Session = Depends(get_db)):
+    profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    profile_data = {
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "dob": profile.dob,
+        "email": profile.email,
+        "address": profile.address,
+        "profile_picture": base64.b64encode(profile.profile_picture).decode() if profile.profile_picture else None
+    }
+
+    return profile_data
+
+#############################################################################
+########################### Generate User Tokens  ###########################
+#############################################################################
+    
+@app.get("/tokens/{user_id}")
+def get_tokens(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"tokens": user.tokens}
+
+@app.post("/purchase_tokens")
+def purchase_tokens(user_id: int, amount: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.tokens += amount
+    db.commit()
+    return {"message": "Tokens purchased successfully", "tokens": user.tokens}
+
