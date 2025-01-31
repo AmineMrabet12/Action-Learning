@@ -179,3 +179,14 @@ The frontend will be available at `http://localhost:8501`.
     - Develop a mobile version of the app using Flutter or React Native.
 
 ## Contributors
+<center>
+<a href="https://github.com/AasimMalik97" target="_blank">
+<img src="https://avatars.githubusercontent.com/u/100610447?v=4" alt="AasimMalik97" style="width: 50px; height: 50px; border-radius: 50px;"> 
+</a>
+<a href="https://github.com/thomasjithin440" target="_blank">
+<img src="https://avatars.githubusercontent.com/u/100941116?v=4" alt="thomasjithin440" style="width: 50px; height: 50px; border-radius: 50%;"> 
+</a>
+<a href="https://github.com/Sa7800111" target="_blank">
+<img src="https://avatars.githubusercontent.com/u/174697950?v=4" alt="Sangeeth Sajeev menon" style="width: 50px; height: 50px; border-radius: 50%;">
+</a>
+</center>
