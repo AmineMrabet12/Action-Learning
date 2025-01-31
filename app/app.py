@@ -26,8 +26,7 @@ st.set_page_config(initial_sidebar_state="collapsed")
 
 API_URL = "http://localhost:8000"
 
-# Initialize session state
-# Initialize session state for user profile
+
 if "user_profile" not in st.session_state:
     st.session_state.user_profile = {}
 
@@ -233,7 +232,6 @@ def show_playlist():
                 song_response = requests.get(f"{API_URL}/song/{song['id']}")
                 if song_response.status_code == 200:
                     song_data = song_response.json()
-                    # st.audio(song_data['audio_url'])
                     audio_data = base64.b64decode(song_data['audio_data'])
                     st.audio(audio_data)
 
@@ -274,8 +272,6 @@ def show_playlist():
                     st.success("Link copied to clipboard!")
                     pyperclip.copy(song_url)
 
-                # else:
-                #     st.error("❌ Failed to fetch playlist.")
 
 def show_login():
     """
@@ -285,7 +281,7 @@ def show_login():
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
-    col1, col2 = st.columns([1, 1])  # Create two columns
+    col1, col2 = st.columns([1, 1])
 
     with col1:
         login_button = st.button("Login", key="login_button", use_container_width=True)
@@ -297,7 +293,7 @@ def show_login():
         response = requests.post(f"{API_URL}/login", json={"username": username, "password": password})
         if response.status_code == 200:
             user_data = response.json()
-            # Store login information in session state
+
             st.session_state.logged_in = True
             st.session_state.username = user_data["username"]
             st.session_state.user_id = user_data["user_id"]
@@ -373,13 +369,13 @@ def show_stories():
     """
     st.title("Your Stories")
 
-    # Get existing stories
+
     response = requests.get(f"{API_URL}/stories", params={"user_id": st.session_state.user_id})
     
     if response.status_code == 200:
         stories = response.json()
 
-        if not stories:  # No active stories available
+        if not stories:
             st.info("You don't have any active stories.")
         
         # Display the existing stories
@@ -411,7 +407,7 @@ def post_story_form():
 
             if response.status_code == 200:
                 st.success("Story posted successfully!")
-                st.session_state.current_page = "stories"  # Navigate back to stories page
+                st.session_state.current_page = "stories"
                 sleep(2)
                 st.rerun()
             else:
