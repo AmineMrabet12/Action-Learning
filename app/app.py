@@ -10,6 +10,8 @@ from time import sleep
 from io import BytesIO
 from PIL import Image
 
+st.set_page_config(initial_sidebar_state="collapsed")
+
 API_URL = "http://localhost:8000"
 
 # Initialize session state
@@ -33,6 +35,7 @@ if "current_page" not in st.session_state:
     st.session_state.current_page = "home"
 
 
+
 st.markdown(
     """
     <style>
@@ -53,8 +56,13 @@ st.markdown(
         justify-content: center;
     }
     </style>
-    """, unsafe_allow_html=True
+    """,
+    unsafe_allow_html=True
 )
+st.image("logo/logo_transparent.png", use_container_width=True)
+
+# Display the logo
+
 
 
 def translate_text(input_text: str, target_language: str = "en"):
@@ -70,6 +78,21 @@ def translate_text(input_text: str, target_language: str = "en"):
 def show_home():
     st.title("Text to Music Generator")
     st.markdown("**Enter a text description to generate music. If the input is in another language, it will be translated to English.**")
+
+    # Fetch the user's token balance
+    token_response = requests.get(f"{API_URL}/tokens/{st.session_state.user_id}")
+    if token_response.status_code == 200:
+        token_balance = token_response.json()["tokens"]
+        st.info(f"**Your current token balance:** {token_balance} tokens")
+    else:
+        st.error("Failed to fetch token balance. Please try again later.")
+        return
+
+    model_options = ["musicgen-small", "musicgen-medium", "musicgen-large"]  # Replace with actual model names
+    selected_model = st.selectbox("Choose a model for song generation:", model_options)
+
+    if selected_model != "musicgen-small":
+        st.warning("**Note:** Higher models costs more **Tokens** and takes longer **Time** to generate music")
 
     # User input for text description
     text_area = st.text_area("Enter your description")
@@ -95,9 +118,15 @@ def show_home():
             st.error("Please enter a description before generating music!")
             return
 
+        # Check if the user has enough tokens
+        if token_balance < 10:
+            st.error("You don't have enough tokens to generate a song. Please purchase more tokens.")
+            return
+
         # Call the API to generate music
         with st.spinner("Generating..."):
             response = requests.post(f"{API_URL}/generate", json={
+                "selected_model": selected_model,
                 "description": translated_text,
                 "duration": time_slider,
                 "song_name": song_name
@@ -106,6 +135,11 @@ def show_home():
         if response.status_code == 200:
             audio_path = response.json()["audio_path"]
             st.audio(audio_path)
+            st.success("Song generated successfully! 10 tokens have been deducted.")
+
+            # Update the token balance display
+            token_balance -= 10
+            st.write(f"**Remaining tokens:** {token_balance}")
         else:
             st.error(response.json()["detail"])
 
@@ -134,7 +168,6 @@ def create_share_button(platform, link, text):
         """,
         unsafe_allow_html=True,
     )
-
 
 def show_playlist():
     """Display user playlist with play, delete, and share options"""
@@ -238,7 +271,6 @@ def show_login():
         st.session_state.register_mode = True
         st.rerun()
 
-
 def show_logout():
     st.session_state.logged_in = False
     st.session_state.username = ""
@@ -246,7 +278,6 @@ def show_logout():
     st.session_state.current_page = "home"
     st.success("Logged out successfully! App will refresh automatically")
     st.rerun()
-
 
 def show_register():
     st.title("Register")
@@ -388,49 +419,167 @@ def update_user_profile(user_id):
         st.error(f"An error occurred: {e}")
 
 
-def show_profile():
-    """Show the user's profile and allow editing."""
-    st.title("User Profile")
+# def show_profile():
+#     """Show the user's profile and allow editing."""
+#     st.title("User Profile")
+
+#     # Fetch profile details if not already loaded
+#     if not st.session_state.user_profile:
+#         get_user_profile()
+
+#     # Profile Picture
+#     st.subheader("Profile Picture")
+#     uploaded_image = st.file_uploader("Upload a New Profile Picture", type=["jpg", "jpeg", "png"])
+
+#     if uploaded_image:
+#         image = Image.open(uploaded_image)
+#         st.image(image, caption="New Profile Picture", use_container_width=True)
+#         st.session_state.user_profile["profile_picture"] = image  # Store the image directly
+
+#     # Display Existing Profile Picture if Available
+#     if "profile_picture" in st.session_state.user_profile and st.session_state.user_profile["profile_picture"]:
+#         profile_picture = st.session_state.user_profile["profile_picture"]
+#         st.image(profile_picture, caption="Current Profile Picture", use_container_width=True)
+
+#     # User Details Form
+#     st.subheader("Edit Profile Details")
+#     st.session_state.user_profile["first_name"] = st.text_input("First Name", st.session_state.user_profile.get("first_name", ""))
+#     st.session_state.user_profile["last_name"] = st.text_input("Last Name", st.session_state.user_profile.get("last_name", ""))
+#     st.session_state.user_profile["email"] = st.text_input("Email", st.session_state.user_profile.get("email", ""))
+#     st.session_state.user_profile["dob"] = st.date_input("Date of Birth", st.session_state.user_profile.get("dob", None))
+#     st.session_state.user_profile["address"] = st.text_area("Address", st.session_state.user_profile.get("address", ""))
+
+#     # Save Button
+#     if st.button("Save Profile"):
+#         userID = st.session_state.user_id
+#         update_user_profile(userID)
+
+def show_profile_preview():
+    st.subheader("Profile Preview")
+
+    # Display profile details
+    profile = st.session_state.user_profile
+    if profile:
+        st.write(f"**First Name:** {profile.get('first_name', 'N/A')}")
+        st.write(f"**Last Name:** {profile.get('last_name', 'N/A')}")
+        st.write(f"**Email:** {profile.get('email', 'N/A')}")
+        st.write(f"**Date of Birth:** {profile.get('dob', 'N/A')}")
+        st.write(f"**Address:** {profile.get('address', 'N/A')}")
+
+        # Display profile picture if available
+        if profile.get("profile_picture"):
+            st.image(profile["profile_picture"], caption="Profile Picture", use_container_width=True)
+        else:
+            st.write("**Profile Picture:** No image uploaded.")
+    else:
+        st.error("No profile data found.")
+
+def show_profile_modify():
+    st.subheader("Modify Profile")
 
     # Fetch profile details if not already loaded
     if not st.session_state.user_profile:
         get_user_profile()
 
-    # Profile Picture
-    st.subheader("Profile Picture")
-    uploaded_image = st.file_uploader("Upload a New Profile Picture", type=["jpg", "jpeg", "png"])
+    # Display form for modifying profile
+    profile = st.session_state.user_profile
+    if profile:
+        first_name = st.text_input("First Name", profile.get("first_name", ""))
+        last_name = st.text_input("Last Name", profile.get("last_name", ""))
+        email = st.text_input("Email", profile.get("email", ""))
+        dob = st.date_input("Date of Birth", value=profile.get("dob", None))
+        address = st.text_area("Address", profile.get("address", ""))
+        uploaded_image = st.file_uploader("Upload a New Profile Picture", type=["jpg", "jpeg", "png"])
 
-    if uploaded_image:
-        image = Image.open(uploaded_image)
-        st.image(image, caption="New Profile Picture", use_container_width=True)
-        st.session_state.user_profile["profile_picture"] = image  # Store the image directly
+        # Save changes
+        if st.button("Save Changes"):
+            # Update the profile data
+            updated_profile = {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "dob": dob,
+                "address": address,
+                "profile_picture": uploaded_image if uploaded_image else profile.get("profile_picture")
+            }
 
-    # Display Existing Profile Picture if Available
-    if "profile_picture" in st.session_state.user_profile and st.session_state.user_profile["profile_picture"]:
-        profile_picture = st.session_state.user_profile["profile_picture"]
-        st.image(profile_picture, caption="Current Profile Picture", use_container_width=True)
+            # Send the updated profile to the backend
+            response = update_user_profile(updated_profile)
+            if response:
+                st.success("Profile updated successfully!")
+                st.session_state.profile_mode = "preview"  # Switch back to preview mode
+                st.rerun()
+            else:
+                st.error("Failed to update profile. Please try again.")
+    else:
+        st.error("No profile data found.")
 
-    # User Details Form
-    st.subheader("Edit Profile Details")
-    st.session_state.user_profile["first_name"] = st.text_input("First Name", st.session_state.user_profile.get("first_name", ""))
-    st.session_state.user_profile["last_name"] = st.text_input("Last Name", st.session_state.user_profile.get("last_name", ""))
-    st.session_state.user_profile["email"] = st.text_input("Email", st.session_state.user_profile.get("email", ""))
-    st.session_state.user_profile["dob"] = st.date_input("Date of Birth", st.session_state.user_profile.get("dob", None))
-    st.session_state.user_profile["address"] = st.text_area("Address", st.session_state.user_profile.get("address", ""))
+def show_profile():
+    st.title("User Profile")
 
-    # Save Button
-    if st.button("Save Profile"):
-        userID = st.session_state.user_id
-        update_user_profile(userID)
+    # Add two buttons: "Preview" and "Modify"
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Preview Profile", use_container_width=True):
+            st.session_state.profile_mode = "preview"
+    with col2:
+        if st.button("Modify Profile", use_container_width=True):
+            st.session_state.profile_mode = "modify"
+
+    # Initialize profile_mode in session state if it doesn't exist
+    if "profile_mode" not in st.session_state:
+        st.session_state.profile_mode = "preview"  # Default to preview mode
+
+    # Fetch profile details if not already loaded
+    if not st.session_state.user_profile:
+        get_user_profile()
+
+    # Display the appropriate section based on the selected mode
+    if st.session_state.profile_mode == "preview":
+        show_profile_preview()
+    elif st.session_state.profile_mode == "modify":
+        show_profile_modify()
 
 
-def get_user_profiles():
-    """Fetch user profiles from the database via API."""
-    return [
-        {"first_name": "John", "last_name": "Doe", "email": "john.doe@example.com", "user_id": 1},
-        {"first_name": "Jane", "last_name": "Smith", "email": "jane.smith@example.com", "user_id": 2},
-        {"first_name": "Mike", "last_name": "Johnson", "email": "mike.johnson@example.com", "user_id": 3},
-    ]
+def update_user_profile(updated_profile):
+    """Update user profile by sending the data to the backend."""
+    try:
+        # Prepare the data for the request
+        profile_data = {
+            "first_name": updated_profile.get("first_name"),
+            "last_name": updated_profile.get("last_name"),
+            "email": updated_profile.get("email"),
+            "dob": updated_profile.get("dob").isoformat() if updated_profile.get("dob") else None,
+            "address": updated_profile.get("address")
+        }
+
+        # Handle the profile picture upload
+        if "profile_picture" in updated_profile and updated_profile["profile_picture"]:
+            # If an image was uploaded, send it as a file
+            files = {"profile_picture": ("profile_picture.png", updated_profile["profile_picture"], "image/png")}
+            response = requests.put(f"{API_URL}/profile/{st.session_state.user_id}", files=files, data=profile_data)
+        else:
+            # If no image was uploaded, send only the profile data
+            response = requests.put(f"{API_URL}/profile/{st.session_state.user_id}", json=profile_data)
+
+        if response.status_code == 200:
+            return True
+        else:
+            st.error(f"Failed to update profile: {response.json().get('detail', 'Unknown error')}")
+            return False
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+        return False
+
+
+def get_user_profile():
+    """Fetch user profile from the backend API."""
+    response = requests.get(f"{API_URL}/profile/{st.session_state.user_id}")
+    if response.status_code == 200:
+        st.session_state.user_profile = response.json()
+    else:
+        st.error("Failed to load profile.")
+    
 
 # Function to show the search page
 def show_search_page():
@@ -441,7 +590,23 @@ def show_search_page():
 
     if search_query:
         # Fetch user profiles from the database (simulated)
-        profiles = get_user_profiles()
+        profiles = [
+            {"first_name": "John", "last_name": "Doe", "email": "john.doe@example.com", "user_id": 1},
+            {"first_name": "Jane", "last_name": "Smith", "email": "jane.smith@example.com", "user_id": 2},
+            {"first_name": "Mike", "last_name": "Johnson", "email": "mike.johnson@example.com", "user_id": 3},
+            {"first_name": "Emily", "last_name": "Davis", "email": "emily.davis@example.com", "user_id": 4},
+            {"first_name": "Daniel", "last_name": "Martinez", "email": "daniel.martinez@example.com", "user_id": 5},
+            {"first_name": "Olivia", "last_name": "Wilson", "email": "olivia.wilson@example.com", "user_id": 6},
+            {"first_name": "William", "last_name": "Anderson", "email": "william.anderson@example.com", "user_id": 7},
+            {"first_name": "Sophia", "last_name": "Brown", "email": "sophia.brown@example.com", "user_id": 8},
+            {"first_name": "James", "last_name": "Miller", "email": "james.miller@example.com", "user_id": 9},
+            {"first_name": "Charlotte", "last_name": "Taylor", "email": "charlotte.taylor@example.com", "user_id": 10},
+            {"first_name": "Liam", "last_name": "Garcia", "email": "liam.garcia@example.com", "user_id": 11},
+            {"first_name": "Isabella", "last_name": "Rodriguez", "email": "isabella.rodriguez@example.com", "user_id": 12},
+            {"first_name": "Ethan", "last_name": "Harris", "email": "ethan.harris@example.com", "user_id": 13},
+            {"first_name": "Mia", "last_name": "Clark", "email": "mia.clark@example.com", "user_id": 14},
+            {"first_name": "Benjamin", "last_name": "Lewis", "email": "benjamin.lewis@example.com", "user_id": 15}
+        ]
 
         # Filter profiles based on search query
         filtered_profiles = [
@@ -451,7 +616,7 @@ def show_search_page():
         if filtered_profiles:
             st.write(f"Found {len(filtered_profiles)} result(s):")
             for profile in filtered_profiles:
-                st.write(f"{profile['first_name']} {profile['last_name']} - {profile['email']}")
+                st.button(f"{profile['first_name']} {profile['last_name']} - {profile['email']}", use_container_width=True)
         else:
             st.write("No results found.")
 
@@ -490,16 +655,50 @@ def show_animation_generator():
         except Exception as e:
             st.error(f"Error generating animation: {str(e)}")
 
+def show_tokens():
+    st.title("Token Management")
+
+    # Fetch the user's current token balance
+    response = requests.get(f"{API_URL}/tokens/{st.session_state.user_id}")
+    if response.status_code == 200:
+        token_balance = response.json()["tokens"]
+        st.info(f"Your current token balance: {token_balance} tokens")
+    else:
+        st.error("Failed to fetch token balance.")
+
+    # Token purchase section
+    st.subheader("Purchase Tokens")
+    token_amount = st.number_input("Enter the number of tokens you want to purchase", min_value=1, value=10)
+
+    if st.button("Purchase Tokens"):
+        # Send user_id and amount as query parameters
+        response = requests.post(
+            f"{API_URL}/purchase_tokens",
+            params={"user_id": st.session_state.user_id, "amount": token_amount}  # Use params for query parameters
+        )
+        
+        # Check if the response is valid JSON
+        try:
+            if response.status_code == 200:
+                st.success(f"Successfully purchased {token_amount} tokens!")
+                sleep(2)
+                st.session_state.current_page = "home"  # Refresh the page
+                st.rerun()
+            else:
+                st.error(f"Failed to purchase tokens: {response.json().get('detail', 'Unknown error')}")
+        except ValueError:  # Handle JSON decode error
+            st.error("Failed to process the response from the server. Please try again.")
+
 # Main
 if __name__ == "__main__":
     # Check if the user is logged in
     if st.session_state.logged_in:
-        # If logged in, show the sidebar options
         st.sidebar.button("Profile", on_click=lambda: st.session_state.update({"current_page": "profile"}), use_container_width=True)
         st.sidebar.button("Home", on_click=lambda: st.session_state.update({"current_page": "home"}), use_container_width=True)
         st.sidebar.button("Playlist", on_click=lambda: st.session_state.update({"current_page": "playlist"}), use_container_width=True)
         st.sidebar.button("Stories", on_click=lambda: st.session_state.update({"current_page": "stories"}), use_container_width=True)
         st.sidebar.button("Search", on_click=lambda: st.session_state.update({"current_page": "search"}), use_container_width=True)
+        st.sidebar.button("Tokens", on_click=lambda: st.session_state.update({"current_page": "tokens"}), use_container_width=True)  # New Tokens button
         st.sidebar.button("Logout", on_click=lambda: st.session_state.update({"logged_in": False, "username": "", "user_id": None}), use_container_width=True)
 
         # Show the page based on the current_page value
@@ -514,6 +713,8 @@ if __name__ == "__main__":
             show_profile()
         elif st.session_state.current_page == "search":
             show_search_page()
+        elif st.session_state.current_page == "tokens":  # Handle the tokens page
+            show_tokens()
 
     else:
         # If not logged in, show login or register pages

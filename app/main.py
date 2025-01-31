@@ -1,5 +1,5 @@
 # FastAPI Backend (backend.py)
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Query
 from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String, LargeBinary, DateTime, Date
 from sqlalchemy.ext.declarative import declarative_base
@@ -74,6 +74,7 @@ class UserRegister(BaseModel):
     confirm_password: str
 
 class SongRequest(BaseModel):
+    selected_model: str
     description: str
     duration: int
     song_name: str
@@ -98,7 +99,7 @@ async def get_db():
         db.close()
 
 # Load MusicGen model
-model = None # MusicGen.get_pretrained('facebook/musicgen-small')
+
 
 # Helper functions
 def save_audio(samples: torch.Tensor, song_name: str):
@@ -120,16 +121,25 @@ def login(user: UserLogin, db = Depends(get_db)):
 def register(user: UserRegister, db = Depends(get_db)):
     if user.password != user.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
+    
     if db.query(User).filter(User.username == user.username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
-    new_user = User(username=user.username, password=user.password)
+    
+    new_user = User(username=user.username, password=user.password, tokens=20)  # Give 20 tokens on signup
     db.add(new_user)
     db.commit()
     return {"message": "Registration successful"}
 
 @app.post("/generate")
 def generate_song(request: SongRequest, user_id: int, db = Depends(get_db)):
+    model = MusicGen.get_pretrained(f'facebook/{request.selected_model}')
+
     user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.tokens < 10:
+        raise HTTPException(status_code=400, detail="Not enough tokens to generate a song")
 
     model.set_generation_params(use_sampling=True, top_k=250, duration=request.duration)
     
@@ -138,7 +148,13 @@ def generate_song(request: SongRequest, user_id: int, db = Depends(get_db)):
     with open(audio_path, 'rb') as f:
         audio_data = f.read()
     
-    user.tokens -= 10
+    if request.selected_model == "musicgen-small":
+        user.tokens -= 10
+    elif request.selected_model == "musicgen-medium":
+        user.tokens -= 20
+    elif request.selected_model == "musicgen-large":
+        user.tokens -= 30
+
     db.commit()
 
     new_song = Song(user_id=user_id, song_name=request.song_name, description=request.description, audio_data=audio_data)
@@ -320,6 +336,8 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
 ########################### Generate User Tokens  ###########################
 #############################################################################
     
+# Add these routes to your FastAPI app
+
 @app.get("/tokens/{user_id}")
 def get_tokens(user_id: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
@@ -332,6 +350,10 @@ def purchase_tokens(user_id: int, amount: int, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.tokens is None:
+        user.tokens = 0  # Initialize to 0 if it's None
+
     user.tokens += amount
     db.commit()
     return {"message": "Tokens purchased successfully", "tokens": user.tokens}
