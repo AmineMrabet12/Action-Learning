@@ -23,6 +23,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Models
 class User(Base):
+    """Database model for storing user information."""
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
@@ -30,6 +31,7 @@ class User(Base):
     tokens = Column(Integer, default=20)
 
 class Song(Base):
+    """Database model for storing generated songs."""
     __tablename__ = 'songs'
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer)
@@ -38,6 +40,7 @@ class Song(Base):
     audio_data = Column(LargeBinary)
 
 class Story(Base):
+    """Database model for storing Stories."""
     __tablename__ = 'stories'
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer)
@@ -49,6 +52,7 @@ class Story(Base):
     #     self.expires_at = self.created_at + timedelta(hours=24)
 
 class UserProfile(Base):
+    """Database model for storing user profile."""
     __tablename__ = 'user_profile'
     
     id = Column(Integer, primary_key=True, index=True)
@@ -92,6 +96,7 @@ app = FastAPI()
 
 # Dependency
 async def get_db():
+    """Dependency function to get the database session."""
     db = SessionLocal()
     try:
         yield db
@@ -103,6 +108,12 @@ async def get_db():
 
 # Helper functions
 def save_audio(samples: torch.Tensor, song_name: str):
+    """
+    Saves generated audio samples as a WAV file.
+    :param samples: The generated audio tensor.
+    :param song_name: The name of the song.
+    :return: The path to the saved audio file.
+    """
     sample_rate = 32000
     save_path = "audio_output/"
     audio_path = os.path.join(save_path, f"{song_name}.wav")
@@ -112,6 +123,12 @@ def save_audio(samples: torch.Tensor, song_name: str):
 # Routes
 @app.post("/login")
 def login(user: UserLogin, db = Depends(get_db)):
+    """
+    Authenticates a user based on username and password.
+    :param user: User login credentials.
+    :param db: Database session dependency.
+    :return: User ID and username if login is successful.
+    """
     db_user = db.query(User).filter(User.username == user.username, User.password == user.password).first()
     if not db_user:
         raise HTTPException(status_code=400, detail="Invalid credentials")
@@ -119,6 +136,12 @@ def login(user: UserLogin, db = Depends(get_db)):
 
 @app.post("/register")
 def register(user: UserRegister, db = Depends(get_db)):
+    """
+    Registers a new user.
+    :param user: User registration details.
+    :param db: Database session dependency.
+    :return: A success message on successful registration.
+    """
     if user.password != user.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
     
@@ -132,6 +155,13 @@ def register(user: UserRegister, db = Depends(get_db)):
 
 @app.post("/generate")
 def generate_song(request: SongRequest, user_id: int, db = Depends(get_db)):
+    """
+    Generates a song using a selected AI model.
+    :param request: Song generation request data.
+    :param user_id: The ID of the requesting user.
+    :param db: Database session dependency.
+    :return: The path to the generated song.
+    """
     model = MusicGen.get_pretrained(f'facebook/{request.selected_model}')
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -165,6 +195,12 @@ def generate_song(request: SongRequest, user_id: int, db = Depends(get_db)):
 
 @app.get("/playlist")
 def get_playlist(user_id: int, db = Depends(get_db)):
+    """
+    Retrieves a user's playlist.
+    :param user_id: The user's ID.
+    :param db: Database session dependency.
+    :return: A list of songs in the user's playlist.
+    """
     songs = db.query(Song).filter(Song.user_id == user_id).all()
     return [{"id": song.id, "song_name": song.song_name, "description": song.description} for song in songs]
 
@@ -237,6 +273,30 @@ async def update_or_create_profile(
     profile_picture: UploadFile = File(None),  # Optional profile picture
     db: Session = Depends(get_db),
 ):
+    """
+    Create or update a user profile.
+
+    If a profile exists, it will be updated with the provided data. If no profile exists,
+    a new one will be created.
+
+    Args:
+        user_id (int): The ID of the user whose profile is being created or updated.
+        first_name (str, optional): The first name of the user.
+        last_name (str, optional): The last name of the user.
+        dob (str, optional): The date of birth in 'YYYY-MM-DD' format.
+        email (str, optional): The email address of the user.
+        address (str, optional): The address of the user.
+        profile_picture (UploadFile, optional): An image file representing the user's profile picture.
+        db (Session): The database session dependency.
+
+    Returns:
+        dict: A response containing a success message and the updated or created profile data.
+
+    Raises:
+        HTTPException: If the user is not found.
+        HTTPException: If the provided `dob` format is incorrect.
+        HTTPException: If an unexpected error occurs.
+    """
     # Check if user exists
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -317,7 +377,31 @@ async def update_or_create_profile(
 
 @app.get("/profile/{user_id}")
 def get_profile(user_id: int, db: Session = Depends(get_db)):
+    """
+    Retrieve a user's profile information.
+
+    This endpoint fetches the profile details of a user based on their user ID.
+    If the profile exists, it returns the first name, last name, date of birth,
+    email, address, and an optional base64-encoded profile picture.
+
+    Args:
+        user_id (int): The ID of the user whose profile is being retrieved.
+        db (Session): The database session dependency.
+
+    Returns:
+        dict: A dictionary containing the user's profile details, including:
+            - first_name (str): The user's first name.
+            - last_name (str): The user's last name.
+            - dob (str or None): The user's date of birth.
+            - email (str): The user's email address.
+            - address (str): The user's address.
+            - profile_picture (str or None): Base64-encoded profile picture if available.
+
+    Raises:
+        HTTPException: If the profile is not found (status code 404).
+    """
     profile = db.query(UserProfile).filter(UserProfile.user_id == user_id).first()
+
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
 
@@ -340,6 +424,12 @@ def get_profile(user_id: int, db: Session = Depends(get_db)):
 
 @app.get("/tokens/{user_id}")
 def get_tokens(user_id: int, db: Session = Depends(get_db)):
+    """
+    Retrieves the number of tokens a user has.
+    :param user_id: The ID of the user.
+    :param db: Database session dependency.
+    :return: The user's token balance.
+    """
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
