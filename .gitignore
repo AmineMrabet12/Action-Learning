@@ -1,3 +1,4 @@
 data/*
 app/audio_output
 .env
+gen_img
