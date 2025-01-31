@@ -1,3 +1,15 @@
+"""
+Streamlit Frontend for Text-to-Music Generator
+==============================================
+
+This module provides the frontend for a web application that allows users to generate music from text descriptions. 
+It includes features like user authentication, token management, playlist creation, story posting, and profile management. 
+The frontend is built using **Streamlit**, and it communicates with a **FastAPI** backend for data processing and storage.
+
+Modules and Functions
+---------------------
+"""
+
 import streamlit as st
 import requests
 import base64
@@ -66,6 +78,13 @@ st.image("logo/logo_transparent.png", use_container_width=True)
 
 
 def translate_text(input_text: str, target_language: str = "en"):
+    """
+    Translate text to the specified target language.
+
+    :param input_text: The text to translate.
+    :param target_language: The target language code (default is "en" for English).
+    :return: Translated text or an error message if translation fails.
+    """
     try:
         translator = Translator()
         # Detect the language and translate the text
@@ -76,6 +95,15 @@ def translate_text(input_text: str, target_language: str = "en"):
 
 # Pages
 def show_home():
+    """
+    Display the home page for generating music from text descriptions.
+
+    Features:
+    - Input text description.
+    - Translate non-English text to English.
+    - Select music duration and song name.
+    - Generate music using the backend API.
+    """
     st.title("Text to Music Generator")
     st.markdown("**Enter a text description to generate music. If the input is in another language, it will be translated to English.**")
 
@@ -144,13 +172,24 @@ def show_home():
             st.error(response.json()["detail"])
 
 def generate_shareable_song_link(song_id):
-    """Generate a shareable link for a song"""
+    """
+    Generate a shareable link for a song.
+
+    :param song_id: The ID of the song.
+    :return: A shareable link for the song.
+    """
     base_url = "https://yourapp.com/song"
     unique_id = str(uuid.uuid4())
     return f"{base_url}/{song_id}/{unique_id}"
 
 def create_share_button(platform, link, text):
-    """Create styled social sharing buttons"""
+    """
+    Create a styled social sharing button.
+
+    :param platform: The social media platform (e.g., "Twitter", "Facebook", "WhatsApp").
+    :param link: The URL to share.
+    :param text: The text to include in the share message.
+    """
     platforms = {
         "Twitter": f"https://twitter.com/intent/tweet?text={urllib.parse.quote(f'Check this out: {text}!')}+{urllib.parse.quote(link)}",
         "Facebook": f"https://www.facebook.com/sharer/sharer.php?u={urllib.parse.quote(link)}",
@@ -239,6 +278,9 @@ def show_playlist():
                 #     st.error("❌ Failed to fetch playlist.")
 
 def show_login():
+    """
+    Display the login page for user authentication.
+    """
     st.title("Login")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
@@ -272,6 +314,9 @@ def show_login():
         st.rerun()
 
 def show_logout():
+    """
+    Log out the user and reset session state.
+    """
     st.session_state.logged_in = False
     st.session_state.username = ""
     st.session_state.user_id = None
@@ -280,6 +325,9 @@ def show_logout():
     st.rerun()
 
 def show_register():
+    """
+    Display the registration page for new users.
+    """
     st.title("Register")
     username = st.text_input("New Username")
     password = st.text_input("New Password", type="password")
@@ -320,6 +368,9 @@ def show_register():
         st.rerun()
 
 def show_stories():
+    """
+    Display the stories page for posting and viewing stories.
+    """
     st.title("Your Stories")
 
     # Get existing stories
@@ -345,6 +396,9 @@ def show_stories():
         post_story_form()
 
 def post_story_form():
+    """
+    Display a form for posting a new story.
+    """
     st.title("Post a Story")
     story_content = st.text_area("Enter your story content (text, image URL, or video URL)")
     
