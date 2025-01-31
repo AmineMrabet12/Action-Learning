@@ -1,4 +1,4 @@
-# Text-to-Music Generator with User Profiles and Token System
+# Text-to-Music Generator
 
 ## Overview
 This project is a web application that allows users to generate music from text descriptions. It includes features like user authentication, token management, playlist creation, story posting, and profile management. The application is built using **Streamlit** for the frontend and **FastAPI** for the backend.
